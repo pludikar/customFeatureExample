@@ -1,0 +1,33 @@
+2022-03-02 16:31:06,716; CustomCove; ERROR; 556; UpdateCove ; Exception
+Traceback (most recent call last):
+  File "C:/Users/Dad/AppData/Roaming/Autodesk/Autodesk Fusion 360/API/AddIns/customPocket/CustomPocket.py", line 552, in UpdateCove
+    baseFeature.updateBody(body, covebody)
+  File "C:/Users/Dad/AppData/Local/Autodesk/webdeploy/production/50d1a2b00ac928c7781cbca6551e586a5384d498/Api/Python/packages\adsk\fusion.py", line 39735, in updateBody
+    return _fusion.BaseFeature_updateBody(self, sourceBody, newBody)
+RuntimeError: 4 : An API Object refers to a deleted Object
+2022-03-02 20:18:20,730; CustomCove; ERROR; 410; ExecutePreviewHandler ; Exception
+Traceback (most recent call last):
+  File "C:/Users/Dad/AppData/Roaming/Autodesk/Autodesk Fusion 360/API/AddIns/customPocket/CustomPocket.py", line 399, in ExecutePreviewHandler
+    comp.bRepBodies.add(covebody, baseFeat)
+  File "C:/Users/Dad/AppData/Local/Autodesk/webdeploy/production/50d1a2b00ac928c7781cbca6551e586a5384d498/Api/Python/packages\adsk\fusion.py", line 4749, in _get_bRepBodies
+    return _fusion.BaseComponent__get_bRepBodies(self)
+RuntimeError: 3 : this is not a parametric design
+2022-03-02 20:18:20,798; CustomCove; ERROR; 337; EditActivateHandler ; Exception
+Traceback (most recent call last):
+  File "C:/Users/Dad/AppData/Roaming/Autodesk/Autodesk Fusion 360/API/AddIns/customPocket/CustomPocket.py", line 335, in EditActivateHandler
+    _edgeSelectInput.addSelection(edge)
+  File "C:/Users/Dad/AppData/Local/Autodesk/webdeploy/production/50d1a2b00ac928c7781cbca6551e586a5384d498/Api/Python/packages\adsk\core.py", line 29845, in addSelection
+    return _core.SelectionCommandInput_addSelection(self, selection)
+RuntimeError: 3 : this is not a parametric design
+2022-03-02 20:56:10,654; CustomCove; ERROR; 489; ComputeCustomFeature ; Exception
+Traceback (most recent call last):
+  File "C:/Users/Dad/AppData/Roaming/Autodesk/Autodesk Fusion 360/API/AddIns/customPocket/CustomPocket.py", line 483, in ComputeCustomFeature
+    if computeRolled:
+UnboundLocalError: local variable 'computeRolled' referenced before assignment
+2022-03-02 20:56:10,780; CustomCove; ERROR; 377; EditExecuteHandler ; Exception
+Traceback (most recent call last):
+  File "C:/Users/Dad/AppData/Roaming/Autodesk/Autodesk Fusion 360/API/AddIns/customPocket/CustomPocket.py", line 364, in EditExecuteHandler
+    dependency.entity = edge
+  File "C:/Users/Dad/AppData/Local/Autodesk/webdeploy/production/50d1a2b00ac928c7781cbca6551e586a5384d498/Api/Python/packages\adsk\fusion.py", line 14026, in _set_entity
+    return _fusion.CustomFeatureDependency__set_entity(self, value)
+RuntimeError: 5 : Combine1(Custom Cove1) / Tool Body Error // 1 Reference Failures The tool body is lost, try editing this feature to reselect tool body. /// TOOL_BODY_REFERENCE_LOST - Body 1 missing / Compute Failed // ALL_TOOL_BODY_REFERENCE_LOST - All tool bodies are lost, try editing this feature to reselect tool bodies.

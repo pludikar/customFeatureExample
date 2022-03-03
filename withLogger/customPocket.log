@@ -1,0 +1,41 @@
+2022-02-04 19:56:35,642; CustomPocket; DEBUG; 52; run ; Running
+2022-02-04 19:56:39,745; CustomPocket; DEBUG; 131; notify ; Creating Pocket Command
+2022-02-04 19:56:41,519; CustomPocket; DEBUG; 466; notify ; PreSelect
+2022-02-04 19:56:41,520; CustomPocket; DEBUG; 466; notify ; PreSelect
+2022-02-04 19:56:41,529; CustomPocket; DEBUG; 466; notify ; PreSelect
+2022-02-04 19:56:41,530; CustomPocket; DEBUG; 466; notify ; PreSelect
+2022-02-04 19:56:41,543; CustomPocket; DEBUG; 466; notify ; PreSelect
+2022-02-04 19:56:41,544; CustomPocket; DEBUG; 466; notify ; PreSelect
+2022-02-04 19:56:41,598; CustomPocket; DEBUG; 466; notify ; PreSelect
+2022-02-04 19:56:41,599; CustomPocket; DEBUG; 466; notify ; PreSelect
+2022-02-04 19:56:41,732; CustomPocket; DEBUG; 466; notify ; PreSelect
+2022-02-04 19:56:41,733; CustomPocket; DEBUG; 466; notify ; PreSelect
+2022-02-04 19:56:41,778; CustomPocket; DEBUG; 466; notify ; PreSelect
+2022-02-04 19:56:41,779; CustomPocket; DEBUG; 466; notify ; PreSelect
+2022-02-04 19:56:41,927; CustomPocket; DEBUG; 466; notify ; PreSelect
+2022-02-04 19:56:41,928; CustomPocket; DEBUG; 466; notify ; PreSelect
+2022-02-04 19:56:41,935; CustomPocket; DEBUG; 466; notify ; PreSelect
+2022-02-04 19:56:41,936; CustomPocket; DEBUG; 466; notify ; PreSelect
+2022-02-04 19:56:41,982; CustomPocket; DEBUG; 466; notify ; PreSelect
+2022-02-04 19:56:41,982; CustomPocket; DEBUG; 466; notify ; PreSelect
+2022-02-04 19:56:42,475; CustomPocket; DEBUG; 466; notify ; PreSelect
+2022-02-04 19:56:42,477; CustomPocket; DEBUG; 190; notify ; ValidateInputsHandler
+2022-02-04 19:56:42,477; CustomPocket; DEBUG; 423; notify ; Execute Preview
+2022-02-04 19:56:42,478; CustomPocket; DEBUG; 535; CreatePocketBody ; Creating pocketBody
+2022-02-04 19:56:42,565; CustomPocket; DEBUG; 190; notify ; ValidateInputsHandler
+2022-02-04 19:56:42,576; CustomPocket; DEBUG; 190; notify ; ValidateInputsHandler
+2022-02-04 19:56:44,730; CustomPocket; DEBUG; 190; notify ; ValidateInputsHandler
+2022-02-04 19:56:44,736; CustomPocket; DEBUG; 190; notify ; ValidateInputsHandler
+2022-02-04 19:56:44,752; CustomPocket; DEBUG; 190; notify ; ValidateInputsHandler
+2022-02-04 19:56:44,757; CustomPocket; DEBUG; 215; notify ; CreateExecuteHandler
+2022-02-04 19:56:44,757; CustomPocket; DEBUG; 535; CreatePocketBody ; Creating pocketBody
+2022-02-04 19:56:44,794; CustomPocket; DEBUG; 492; notify ; ComputeCustomFeature
+2022-02-04 19:56:44,794; CustomPocket; DEBUG; 535; CreatePocketBody ; Creating pocketBody
+2022-02-04 19:56:44,820; CustomPocket; ERROR; 266; notify ; Exception
+Traceback (most recent call last):
+  File "C:/Users/Dad/AppData/Roaming/Autodesk/Autodesk Fusion 360/API/AddIns/customPocket/CustomPocket.py", line 264, in notify
+    comp.features.customFeatures.add(custFeatInput)
+  File "C:/Users/Dad/AppData/Local/Autodesk/webdeploy/production/a92224e805924f40fe2f5cb1ea196540cf83211e/Api/Python/packages\adsk\fusion.py", line 14412, in add
+    return _fusion.CustomFeatures_add(self, input)
+RuntimeError: 5 : Combine1(Custom Pocket1) / Tool Body Error // 1 Reference Failures The tool body is lost, try editing this feature to reselect tool body. /// TOOL_BODY_REFERENCE_LOST - Body 1 missing / Compute Failed // ALL_TOOL_BODY_REFERENCE_LOST - All tool bodies are lost, try editing this feature to reselect tool bodies.
+2022-02-04 19:57:08,303; CustomPocket; DEBUG; 98; stop ; Stopping
