@@ -1,35 +1,37 @@
 #Author-Autodesk
 #Description-Demonstrates the creation of a custom feature.
 
+from dis import dis
 from pickletools import ArgumentDescriptor
+import re
 from tkinter import E
 from tkinter.messagebox import NO
 from venv import create
 import adsk.core, adsk.fusion, traceback
 import logging
 import os
-from .decorators import eventHandler, HandlerCollection
-
+from .decorators import eventHandler, HandlerCollection, timelineMarkers
 appPath = os.path.dirname(os.path.abspath(__file__))
 
-logger = logging.getLogger('CustomCove')
+logger = logging.getLogger('customCove')
 
 if len(logger.handlers):
     del logger.handlers[:]
 
-logger.setLevel(logging.WARNING)
+logger.setLevel(logging.DEBUG)
 formatter = logging.Formatter('%(asctime)s; %(name)s; %(levelname)s; %(lineno)d; %(funcName)s ; %(message)s')
-logHandler = logging.FileHandler(os.path.join(appPath, 'customCove.log'), mode='w')
+logHandler = logging.FileHandler(os.path.join(appPath, 'customFeatureExample.log'), mode='w')
 logHandler.setFormatter(formatter)
 logHandler.setLevel(logging.DEBUG)
 logger.addHandler(logHandler)
-logger.setLevel(logging.WARNING)
+logger.setLevel(logging.DEBUG)
 
 _app: adsk.core.Application = None
 _ui: adsk.core.UserInterface = None
+_des: adsk.fusion.Design = None
+_root = None
 
-# des: adsk.fusion.Design = None
-root = None
+_edge_token = None
 
 _customFeatureDef: adsk.fusion.CustomFeature = None
 
@@ -38,21 +40,23 @@ _radiusInput: adsk.core.ValueCommandInput = None
 
 _alreadyCreatedCustomFeature: adsk.fusion.CustomFeature = None
 _restoreTimelineObject: adsk.fusion.TimelineObject = None
-_alreadyCreated: bool = False
+# _alreadyCreated: bool = False
 _isRolledForEdit = False
-_computeCustomFeatureEventHandle = None
+_compute_handler = None
+_start_tl_object = None
+_active_custom_feature = None
 
 class NotInRolledBackState(Exception):
     pass
 
 def run(context):
     try:
-        global _app, _ui 
-        global root, _computeCustomFeatureEventHandle
+        global _app, _ui, _des, _root
+        global _compute_handler
         _app = adsk.core.Application.get()
         _ui  = _app.userInterface
-        des: adsk.fusion.Design = _app.activeProduct
-        root = des.rootComponent
+        _des = _app.activeProduct
+        _root = _des.rootComponent
         
         handlerGroup = 'run'
         logger.debug("Running")
@@ -75,10 +79,10 @@ def run(context):
 
         # Connect to the command created event for the create command.
         HandlerCollection.remove(groupId =  handlerGroup)
-        CreateCoveCommandCreatedHandler(event = createCmdDef.commandCreated, groupId =  handlerGroup)
+        on_create_handler(event = createCmdDef.commandCreated, groupId =  handlerGroup)
 
         # Connect to the command created event for the edit command.
-        EditCoveCommandCreatedHandler(event = editCmdDef.commandCreated, groupId =  handlerGroup)
+        on_create_edit_handler(event = editCmdDef.commandCreated, groupId =  handlerGroup)
 
         # Create the custom feature definition.
         global _customFeatureDef
@@ -88,7 +92,7 @@ def run(context):
         _customFeatureDef.editCommandId = 'adskCustomCoveEdit'
 
         # Connect to the compute event for the custom feature.
-        _computeCustomFeatureEventHandle = ComputeCustomFeature(event = _customFeatureDef.customFeatureCompute, groupId =  handlerGroup)
+        _compute_handler = on_compute_custom_feature(event = _customFeatureDef.customFeatureCompute, groupId =  handlerGroup)
     except:
         logger.exception('Exception')
         showMessage('Run Failed:\n{}'.format(traceback.format_exc()))
@@ -96,10 +100,8 @@ def run(context):
 
 def stop(context):
     logger.debug('Stopping')
-    for handler in logger.handlers:
-        handler.flush()
-        handler.close()
-        logger.removeHandler(handler)
+    if len(logger.handlers):
+        del logger.handlers[:]
     try:
         # Remove all UI elements.
         logger.debug('Stopping')
@@ -126,93 +128,187 @@ def stop(context):
 # Define the command inputs needed to get the input from the user for the
 # creation of the feauture and connect to the command related events.
 @eventHandler(handler_cls = adsk.core.CommandCreatedEventHandler)
-def CreateCoveCommandCreatedHandler(eventArgs: adsk.core.CommandCreatedEventArgs):
+@timelineMarkers
+def on_create_handler(eventArgs: adsk.core.CommandCreatedEventArgs):
     try:
         global _edgeSelectInput, _radiusInput
+        global _des, _root, _start_tl_object
 
+        root: adsk.fusion.Component = _root
+        
         logger.debug('Creating Cove Command')
-        handlerGroup = 'CreateCoveCommandCreatedHandler'
+        handlerGroup = 'on_create_handler'
         cmd = eventArgs.command
         inputs = cmd.commandInputs
-        des: adsk.fusion.Design = _app.activeProduct
+        des: adsk.fusion.Design = _des
 
         # Create the selection input to select the body(s).
-        _edgeSelectInput = inputs.addSelectionInput('selectPoint', 
-                                                        'Points', 
-                                                        'Select point to define pocket position.')
+        _edgeSelectInput = inputs.addSelectionInput('selectEdge', 
+                                                        'Edges', 
+                                                        'Select edge to define cove location.')
         _edgeSelectInput.addSelectionFilter('Edges')
-        _edgeSelectInput.tooltip = 'Select edge to define the bevel.'
+        _edgeSelectInput.tooltip = 'Select edge to define the cove.'
         _edgeSelectInput.setSelectionLimits(1, 1)
 
         lengthUnits = des.unitsManager.defaultLengthUnits
 
         # Create the value input to get the fillet radius.
         radius = adsk.core.ValueInput.createByReal(0.5)
-        _radiusInput = inputs.addValueInput('cornerRadius', 'Corner Radius', lengthUnits, radius)
-                                            
+        inputs.addValueInput('radius', 'Corner Radius', lengthUnits, radius)
+
         # Connect to the needed command related events.
         HandlerCollection.remove(handlerGroup)
-        ExecutePreviewHandler(event = cmd.executePreview, groupId =  handlerGroup)
 
-        CreateExecuteHandler(event = cmd.execute, groupId =  handlerGroup)
+        on_preview_handler(event = cmd.executePreview, groupId = handlerGroup)
 
-        PreSelectHandler(event = cmd.preSelect, groupId =  handlerGroup)
+        on_execute_handler(event = cmd.execute, groupId = handlerGroup)
 
-        ChangeHandler(event = cmd.inputChanged, groupId = handlerGroup) 
+        on_preselect_handler(event = cmd.preSelect, groupId = handlerGroup)
 
-        ValidateInputsHandler(event = cmd.validateInputs, groupId =  handlerGroup)
+        on_change_handler(event = cmd.inputChanged, groupId = handlerGroup)
+
+        on_activate_handler(event = cmd.activate, groupId = handlerGroup)
+
+        on_validate_inputs_handler(event = cmd.validateInputs, groupId = handlerGroup)
     except:
         logger.exception('Exception')
-        showMessage('CommandCreated failed: {}\n'.format(traceback.format_exc()))
+        showMessage(f'CommandCreated failed: {traceback.format_exc()}\n')
+
+@eventHandler(handler_cls = adsk.core.CommandEventHandler)
+def on_activate_handler(args: adsk.core.CommandEventArgs):
+    logger.debug('on_activate_handler')
+
+    global _des, _root
+    global _customFeatureDef, _active_custom_feature
+    global _start_tl_object
+    cmd = args.command
+    radiusCommandInput:adsk.core.ValueCommandInput = cmd.commandInputs.itemById('radius')
+    radiusInput = adsk.core.ValueInput.createByString(radiusCommandInput.expression)
+    des: adsk.fusion.Design = _des
+    root: adsk.fusion.Component = _root
+    tempEdge = root.bRepBodies.item(0).edges.item(0)
+
+    marker_pos = des.timeline.markerPosition
+    _start_tl_object = des.timeline.item(marker_pos-1)
+
+    customFeatureInput = root.features.customFeatures.createInput(_customFeatureDef)
+
+    lengthUnits = des.unitsManager.defaultLengthUnits
+    customFeatureInput.addCustomParameter('radius', 'Radius', radiusInput, lengthUnits, True)
+    customFeatureInput.addDependency('edge', tempEdge)
+
+    _compute_handler.disableOnce()
+    customFeature = root.features.customFeatures.add(customFeatureInput) 
+    #^^^creates new customFeature object in timeline^^^
+
+    # cmd.editingFeature = customFeature
+    _active_custom_feature = customFeature
+
+    _active_custom_feature.timelineObject.rollTo(False)
+
+    # cmd.beginStep()
+    pass
 
 @eventHandler(handler_cls = adsk.core.InputChangedEventHandler)
-def ChangeHandler(eventArgs: adsk.core.InputChangedEventArgs):
-    logger.debug('ChangeHandler')
-    pass
+def on_change_handler(eventArgs: adsk.core.InputChangedEventArgs):
+    logger.debug('on_change_handler') 
+    global _root, _des, _ui
+    global _edge_token
+
+    root:adsk.fusion.Component = _root
+    des:adsk.fusion.Design = _des
+    ui: adsk.core.UserInterface = _ui
+
+    input:adsk.core.CommandInput = eventArgs.input
+    inputs: adsk.core.CommandInputs = eventArgs.inputs
+    # customFeature:adsk.fusion.CustomFeature = eventArgs.inputs.command.editingFeature
+    customFeature: adsk.fusion.CustomFeature = _active_custom_feature
+
+    if input.id == 'selectEdge':
+        edge = input.selection(0).entity
+        try:
+            activeEdge = customFeature.dependencies.itemById('edge').entity
+            _edge_token = edge.entityToken
+        except Exception:
+            activeEdge = None  #this is a workaround - itemById is supposed to return NULL if not found
+        if not edge:  #Edge has been unselected
+            if not activeEdge:
+                return
+            activeEdge.deleteMe()
+            return
+
+        #edge has been selected
+
+        if not activeEdge:
+            customFeature.timelineObject.rollTo(True)
+            _compute_handler.disableOnce()
+            customFeature.dependencies.add('edge', edge)
+            _edge_token = edge.entityToken
+            customFeature.timelineObject.rollTo(False)
+            ui.activeSelections.add(edge)
+            return
+
+        _compute_handler.disableOnce()
+        customFeature.dependencies.itemById('edge').entity = edge
+        # _ = eventArgs.firingEvent.sender.doExecutePreview()
+        return
+
+    radiusValueInput = inputs.itemById('radius').expression
+    radiusValue = adsk.core.ValueInput.createByString(radiusValueInput)
+
+    # _compute_handler.disableOnce()
+    customFeature.parameters.itemById('radius').expression = eventArgs.inputs.itemById('radius').expression
+
+    eventArgs.firingEvent.sender.beginStep()
 
 # Event handler for the validateInputs event.
 @eventHandler(handler_cls = adsk.core.ValidateInputsEventHandler)
-def ValidateInputsHandler(eventArgs: adsk.core.ValidateInputsEventArgs):
-    logger.debug('ValidateInputsHandler')
+def on_validate_inputs_handler(eventArgs: adsk.core.ValidateInputsEventArgs):
+    logger.debug('on_validate_inputs_handler')
     try:
+
+        # return eventArgs.inputs.itemById('radius').isValidExpression
         # Verify the inputs have valid expressions.
-        if not all( [_radiusInput.isValidExpression] ):
+        if not all( [eventArgs.inputs.itemById('radius').isValidExpression,
+                    eventArgs.inputs.itemById('selectEdge').isValid] ):
             eventArgs.areInputsValid = False
             return
-
-        # Verify the sizes are valid.
-        # diam = _radiusInput.value * 2
-        # if diam + 0.01 > _lengthInput.value or diam + 0.01 > _widthInput.value:
-        #     eventArgs.areInputsValid = False
-        #     return
+        eventArgs.areInputsValid = True
     except:
         logger.exception('Exception')
-        showMessage('ValidateInputsHandler: {}\n'.format(traceback.format_exc()))
+        showMessage(f'on_validate_inputs_handler: {traceback.format_exc()}\n')
 
         
 # Event handler for the execute event of the create command.
 @eventHandler(handler_cls = adsk.core.CommandEventHandler)
-def CreateExecuteHandler(eventArgs: adsk.core.CommandEventArgs):
-    global _alreadyCreated, _computeCustomFeatureEventHandle
-    logger.debug('CreateExecuteHandler')
-    _computeCustomFeatureEventHandle.disable()
+@timelineMarkers
+def on_execute_handler(eventArgs: adsk.core.CommandEventArgs):
+    global _compute_handler
+    global _active_custom_feature
+    global _des, _root, _start_tl_object
+    global _edge_token
+
+    logger.debug('on_execute_handler')
+    # _compute_handler.disable()
+    des: adsk.fusion.Design = _des
+    root: adsk.fusion.Component = _root
+    # _start_tl_object.rollTo(False)
+
+    # custom_feature: adsk.fusion.CustomFeature = eventArgs.command.editingFeature
+    custom_feature: adsk.fusion.CustomFeature = _active_custom_feature
+    custom_feature.timelineObject.rollTo(True)
+
     try:
         # Create the body of the pocket.
-        edge: adsk.fusion.BRepCoEdge = _edgeSelectInput.selection(0).entity
+        edge: adsk.fusion.BRepEdge = des.findEntityByToken(_edge_token)[0]
+        radius = eventArgs.command.commandInputs.itemById('radius').value
+        radiusValue = adsk.core.ValueInput.createByReal(radius)
 
-        des: adsk.fusion.Design = _app.activeProduct
         defLengthUnits = des.unitsManager.defaultLengthUnits
 
-        covebody = CreateCove(edge, _radiusInput.value)
+        covebody = CreateCove(edge, radius)
 
         comp = edge.body.parentComponent
-
-        custFeatInput = comp.features.customFeatures.createInput(_customFeatureDef)
-
-        radiusInput = adsk.core.ValueInput.createByString(_radiusInput.expression)             
-        custFeatInput.addCustomParameter('radius', 'Radius', radiusInput,
-                                            defLengthUnits, True)               
-
 
         # Subtract the pocket from the parametric body.
         paramBody = edge.body
@@ -231,51 +327,47 @@ def CreateExecuteHandler(eventArgs: adsk.core.CommandEventArgs):
         combineInput.operation = adsk.fusion.FeatureOperations.CutFeatureOperation
         combineFeature = comp.features.combineFeatures.add(combineInput)
         
-        # Create the custom feature input.
-        # des: adsk.fusion.Design = _app.activeProduct
-        # defLengthUnits = des.unitsManager.defaultLengthUnits
-        custFeatInput.setStartAndEndFeatures(baseFeat, combineFeature)
-        logger.debug(f'Execute - _alreadyCreated: {_alreadyCreated}')
-        custFeat: adsk.fusion.CustomFeature = comp.features.customFeatures.add(custFeatInput)
-
-        
-        timeline = des.timeline
-        markerPosition = timeline.markerPosition
-        timelineObject = timeline.item(markerPosition - 1)
-        # Roll the timeline to just before the custom feature being edited.
-        timelineObject.rollTo(rollBefore = True)
-
-        custFeat.dependencies.add('edge', edge) #<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
-
-        # Roll the timeline to its previous position.
-        timelineObject.rollTo(False)
-        _computeCustomFeatureEventHandle.enable()
-
+        # Update the custom feature with start and end features.
+        custom_feature.setStartAndEndFeatures(baseFeat, combineFeature)
+        try:
+            entity = custom_feature.dependencies.itemById('edge').entity
+        except:
+            entity = des. findEntityByToken(_edge_token)
+            _compute_handler.disableOnce()
+            custom_feature.dependencies.add('edge', edge)
+        _ = custom_feature.timelineObject.rollTo(False)
+        # _ = _start_tl_object.rollTo(False)
+        pass
     except:
         logger.exception('Exception')
         eventArgs.executeFailed = True
-        showMessage('Execute: {}\n'.format(traceback.format_exc()))
+        showMessage(f'Execute: {traceback.format_exc()}\n')
 
 
 @eventHandler(handler_cls = adsk.core.CommandCreatedEventHandler)
-def EditCoveCommandCreatedHandler(eventArgs: adsk.core.CommandCreatedEventArgs):
-    global _alreadyCreated, _computeCustomFeatureEventHandle
-    global _alreadyCreatedCustomFeature
+def on_create_edit_handler(eventArgs: adsk.core.CommandCreatedEventArgs):
+    global _compute_handler, _start_tl_object
     global _edgeSelectInput, _radiusInput
+    global _des, _root
+
     
-    logger.debug('Edit Command created')
+    logger.debug('on_create_edit_handler')
     try:
-        _computeCustomFeatureEventHandle.disableOnce()
-        handlerGroup = 'EditCoveCommandCreatedHandler'
+        handlerGroup = 'on_create_edit_handler'
         cmd = eventArgs.command
         inputs = cmd.commandInputs
-        des: adsk.fusion.Design = _app.activeProduct
+        des: adsk.fusion.Design = _des
         defLengthUnits = des.unitsManager.defaultLengthUnits
 
         # Get the currently selected custom feature.
-        _alreadyCreatedCustomFeature = _ui.activeSelections.item(0).entity
-        if _alreadyCreatedCustomFeature is None:
+        currentCustomFeature: adsk.fusion.CustomFeature = _ui.activeSelections.item(0).entity
+        if currentCustomFeature is None:
             return
+
+        _start_tl_object = des.timeline.item(des.timeline.markerPosition)
+
+        customFeatureTimelineObject = currentCustomFeature.timelineObject
+        customFeatureTimelineObject.rollTo(rollBefore = True)
 
         # Create the selection input to select the sketch point.
         _edgeSelectInput = inputs.addSelectionInput('selectPoint', 
@@ -286,106 +378,138 @@ def EditCoveCommandCreatedHandler(eventArgs: adsk.core.CommandCreatedEventArgs):
         _edgeSelectInput.setSelectionLimits(1, 1)
 
         # Get the collection of custom parameters for this custom feature.
-        params = _alreadyCreatedCustomFeature.parameters
+        params = currentCustomFeature.parameters
 
         # Create the value input to get the fillet radius.
         radius = adsk.core.ValueInput.createByString(params.itemById('radius').expression)
-        _radiusInput = inputs.addValueInput('cornerRadius', 'Corner Radius', defLengthUnits, radius)
+        _radiusInput = inputs.addValueInput('radius', 'Corner Radius', defLengthUnits, radius)
                                             
         # Connect to the needed command related events.
-        HandlerCollection.remove(handlerGroup)
-        ExecutePreviewHandler(event = cmd.executePreview, groupId =  handlerGroup)
+        HandlerCollection.remove('on_execute_edit_handlerGroup')
 
-        EditExecuteHandler(event = cmd.execute, groupId =  handlerGroup)
+        # cmd.editingFeature = currentCustomFeature
 
-        PreSelectHandler(event = cmd.preSelect, groupId =  handlerGroup)
+        on_preview_handler(event = cmd.executePreview, groupId =  handlerGroup)
 
-        EditActivateHandler(event = cmd.activate, groupId =  handlerGroup)
+        on_execute_edit_handler(event = cmd.execute, groupId =  handlerGroup)
 
-        ValidateInputsHandler(event = cmd.validateInputs, groupId =  handlerGroup)
+        on_preselect_handler(event = cmd.preSelect, groupId =  handlerGroup)
+
+        on_activate_edit_handler(event = cmd.activate, groupId =  handlerGroup)
+
+        on_validate_inputs_handler(event = cmd.validateInputs, groupId =  handlerGroup)
     except:
         logger.exception('Exception')
-        showMessage('CommandCreated failed: {}\n'.format(traceback.format_exc()))
+        showMessage(f'CommandCreated failed: {traceback.format_exc()}\n')
 
 
 # Event handler for the activate event.
 @eventHandler(handler_cls = adsk.core.CommandEventHandler)
-def EditActivateHandler(eventArgs: adsk.core.CommandEventArgs):
+@timelineMarkers
+def on_activate_edit_handler(args: adsk.core.CommandEventArgs):
     global _restoreTimelineObject, _isRolledForEdit
+    global _des, _root
+
     
-    logger.debug('Edit Activate')
+    logger.debug('on_activate_edit_handler')
+    des: adsk.fusion.Design = _des
     try:
-        des: adsk.fusion.Design = _app.activeProduct
+
+        currentCustomFeature: adsk.fusion.CustomFeature = _active_custom_feature
+        # currentCustomFeature = args.command.editingFeature
 
         # Save the current position of the timeline.
-        timeline = des.timeline
-        markerPosition = timeline.markerPosition
-        _restoreTimelineObject = timeline.item(markerPosition - 1)
-
-        # Roll the timeline to just before the custom feature being edited.
-        _alreadyCreatedCustomFeature.timelineObject.rollTo(rollBefore = True)
+        # timeline = des.timeline
+        # currentPosition = timeline.markerPosition
+        # _restoreTimelineObject = timeline.item(currentPosition - 1)
 
         _isRolledForEdit = True
 
-        # Define a transaction marker so the the roll is not aborted with each change.
-        eventArgs.command.beginStep()
+        # Roll the timeline to just before the custom feature being edited.
+        currentCustomFeature.timelineObject.rollTo(rollBefore = True)
 
-        # Get the edge and add it to the selection input.
-        edge = _alreadyCreatedCustomFeature.dependencies.itemById('edge').entity
+        # Define a transaction marker so the the roll is not aborted with each change.
+
+        # args the edge and add it to the selection input.
+        edge = currentCustomFeature.dependencies.itemById('edge').entity
         _edgeSelectInput.addSelection(edge)
+        args.command.beginStep()
     except:
         logger.exception('Exception')
-        showMessage('Execute: {}\n'.format(traceback.format_exc()))
+        showMessage(f'Execute: {traceback.format_exc()}\n')
 
 
 # Event handler for the execute event of the edit command.
 @eventHandler(handler_cls = adsk.core.CommandEventHandler)
-def EditExecuteHandler(eventArgs: adsk.core.CommandEventArgs):
-    logger.debug('EditExecuteHandler')
-    global _alreadyCreated
-    global _alreadyCreatedCustomFeature
-    global _isRolledForEdit
+@timelineMarkers
+def on_execute_edit_handler(args: adsk.core.CommandEventArgs):
+    global _isRolledForEdit, _start_tl_object
+    global _des, _root
+
+    
+    logger.debug('on_execute_edit_handler')
+
+    des: adsk.fusion.Design = _des
+
+    # customFeature: adsk.fusion.CustomFeature = args.command.editingFeature
+    customFeature: adsk.fusion.CustomFeature = _active_custom_feature
+
+    
+
+    # timelineObject = customFeature.timelineObject
+
+    # Roll the timeline to its previous position.
+    # if not _isRolledForEdit:
+    #     raise NotInRolledBackState
 
     try:
 
         edge = _edgeSelectInput.selection(0).entity
 
         # Update the parameters.
-        params = _alreadyCreatedCustomFeature.parameters
+        params = customFeature.parameters
 
         radiusParam = params.itemById('radius')
-        radiusParam.expression = _radiusInput.expression
+        radiusParam.expression = args.command.commandInputs.itemById('radius').expression
 
         # Update the feature.
-        UpdateCove(_alreadyCreatedCustomFeature)
+        UpdateCove(customFeature)
 
         # Update the point dependency.
-        dependency = _alreadyCreatedCustomFeature.dependencies.itemById('edge')
+        dependency = customFeature.dependencies.itemById('edge')
         dependency.entity = edge
 
-        # Roll the timeline to its previous position.
-        if not _isRolledForEdit:
-            raise NotInRolledBackState
-
-        _restoreTimelineObject.rollTo(False)
-        _isRolledForEdit = False
-
-        _alreadyCreatedCustomFeature = None
+        _start_tl_object.rollTo(False)
 
         showMessage('Finished ExecuteHandler')
     except:
         logger.exception('Exception')
-        showMessage('Execute: {}\n'.format(traceback.format_exc()))
-
+        showMessage(f'Execute: {traceback.format_exc()}\n')
 
 # Event handler for the executePreview event.
 @eventHandler(handler_cls = adsk.core.CommandEventHandler)
-def ExecutePreviewHandler(eventArgs: adsk.core.CommandEventArgs):
-    logger.debug('Execute Preview')
+@timelineMarkers
+def on_preview_handler(eventArgs: adsk.core.CommandEventArgs):
+    global _root, _des
+    global _customFeatureDef
+    global _start_tl_object
+    global _edge_token
+
+    des: adsk.fusion.Design = _des
+    root: adsk.fusion.Component = _root
+    # custom_feature = eventArgs.command.editingFeature
+    custom_feature: adsk.fusion.CustomFeature = _active_custom_feature
+
+    logger.debug('on_preview_handler')
     try:
+
+        custom_feature.timelineObject.rollTo(True)
         # Get the settings from the inputs.
-        edge: adsk.fusion.BrepEdge = _edgeSelectInput.selection(0).entity
-        radius = _radiusInput.value
+
+        # edge: adsk.fusion.BrepEdge = eventArgs.command.commandInputs.itemById('selectEdge').selection(0).entity
+        edge: adsk.fusion.BRepEdge = des.findEntityByToken(_edge_token)[0]
+        radius = eventArgs.command.commandInputs.itemById('radius').value
+        radiusValue = adsk.core.ValueInput.createByReal(radius)
 
         # Create the fillet feature.
         covebody = CreateCove(edge, radius)
@@ -406,17 +530,26 @@ def ExecutePreviewHandler(eventArgs: adsk.core.CommandEventArgs):
         combineInput.isKeepToolBodies = False
         combineInput.operation = adsk.fusion.FeatureOperations.CutFeatureOperation
         comp.features.combineFeatures.add(combineInput)
+
+        custom_feature.timelineObject.rollTo(False)
+        # eventArgs.isValidResult = True
+        # _ = des.timeline.movetoNextStep()
+        # pass
+        # adsk.doEvents()
     except:
         logger.exception('Exception')
-        showMessage('ExecutePreview: {}\n'.format(traceback.format_exc()))       
+        showMessage(f'ExecutePreview: {traceback.format_exc()}\n')       
 
 
 # Controls what the user can select when the command is running.
 # This checks to make sure the point is on a planar face and the
 # body the point is on is not an external reference.
 @eventHandler(handler_cls = adsk.core.SelectionEventHandler)
-def PreSelectHandler(eventArgs: adsk.core.SelectionEventArgs):
-    logger.debug('PreSelect')
+def on_preselect_handler(eventArgs: adsk.core.SelectionEventArgs):
+    global _des, _root
+
+    des: adsk.fusion.Design = _des
+    logger.debug('on_preselect_handler')
     try:
         edge: adsk.fusion.BrepEdge = eventArgs.selection.entity
 
@@ -432,29 +565,33 @@ def PreSelectHandler(eventArgs: adsk.core.SelectionEventArgs):
                 return
     except:
         logger.exception('Exception')
-        showMessage('PreSelectEventHandler: {}\n'.format(traceback.format_exc()))
+        showMessage(f'PreSelectEventHandler: {traceback.format_exc()}\n')
 
 
 # Event handler to handle the compute of the custom feature.
 @eventHandler(handler_cls = adsk.fusion.CustomFeatureEventHandler)
-def ComputeCustomFeature(args: adsk.fusion.CustomFeatureEventArgs):
-    logger.debug('ComputeCustomFeature')
+@timelineMarkers
+def on_compute_custom_feature(args: adsk.fusion.CustomFeatureEventArgs):
     global _isRolledForEdit
-    des: adsk.fusion.Design = _app.activeProduct
+    global _des, _root
+
+    logger.debug('on_compute_custom_feature')
+
+    des: adsk.fusion.Design = _des
+    logger.debug(f'1st inside on_compute_custom_feature = {des.timeline.markerPosition}')
 
     try:
-        if not _isRolledForEdit:
-            computeRolled = True
-            timeline = des.timeline
-            markerPosition = timeline.markerPosition
-            restoreTL = timeline.item(markerPosition - 1)
-            # Roll the timeline to just before the custom feature being edited.
-            restoreTL.rollTo(rollBefore = True)
-
-        eventArgs: adsk.fusion.CustomFeatureEventArgs = args
+        adsk.doEvents()
+        timeline = des.timeline
+        markerPosition = timeline.markerPosition
+        restoreTL = timeline.item(markerPosition-1)
+        
+        # Roll the timeline to just before the custom feature being edited.
 
         # Get the custom feature that is being computed.
-        custFeature = eventArgs.customFeature
+        custFeature: adsk.fusion.CustomFeature = args.customFeature
+        custFeatTimelineObject = custFeature.timelineObject
+        custFeatTimelineObject.rollTo(rollBefore = True)
 
         # Get the original sketch point and the values from the custom feature.
         edge = custFeature.dependencies.itemById('edge').entity
@@ -465,7 +602,7 @@ def ComputeCustomFeature(args: adsk.fusion.CustomFeatureEventArgs):
         covebody = CreateCove(edge, radius)
         if covebody is None:
             # Add a failure status message because it failed to create the pocket.
-            eventArgs.computeStatus.statusMessages.addError('DRPOINT_COMPUTE_FAILED', '')
+            args.computeStatus.statusMessages.addError('DRPOINT_COMPUTE_FAILED', '')
             return
         
         # Get the existing base feature and update the body.
@@ -480,11 +617,8 @@ def ComputeCustomFeature(args: adsk.fusion.CustomFeatureEventArgs):
         body: adsk.fusion.BRepBody = baseFeature.bodies.item(0)
         baseFeature.updateBody(body, covebody)
         baseFeature.finishEdit()
-        if computeRolled:
-            computeRolled = False
-            restoreTL.rollTo(False)
+        restoreTL.rollTo(False)
             
-        adsk.doEvents()
     except:
         logger.exception('Exception')
         showMessage(f'CustomFeatureCompute: {traceback.format_exc()}\n')
@@ -492,6 +626,7 @@ def ComputeCustomFeature(args: adsk.fusion.CustomFeatureEventArgs):
 
 # Utility function that given the position and pocket size builds
 # a temporary B-Rep body is the tool body to create the pocket.
+@timelineMarkers
 def CreateCove(edge: adsk.fusion.BRepEdge, radius):
     logger.debug('Creating covebody')
     try:
@@ -522,39 +657,38 @@ def CreateCove(edge: adsk.fusion.BRepEdge, radius):
         return newBody
     except:
         logger.exception('Exception')
-        showMessage('CreateCove: {}\n'.format(traceback.format_exc()))
+        showMessage(f'CreateCove: {traceback.format_exc()}\n')
 
 
 # Updates an existing custom pocket feature.
+@timelineMarkers
 def UpdateCove(customFeature: adsk.fusion.CustomFeature) -> bool:
     logger.debug('UpdateCove')
+    # des: adsk.fusion.Design = _app.activeProduct
     try:
-        # Get the original sketch point and the values from the custom feature.
+        # Get the original edge and radius from the custom feature.
         edge: adsk.fusion.BrepEdge = customFeature.dependencies.itemById('edge').entity
 
         radius = customFeature.parameters.itemById('radius').value
 
-        # Create a new temporary body for the pocket. This can return None when the point isn't on a face.
+        # Create a new temporary body for the pocket.
         covebody = CreateCove(edge, radius)
         if covebody is None:
             return False
         
         # Get the existing base feature and update the body.
-        baseFeature: adsk.fusion.BaseFeature = None
-        for feature in customFeature.features:
-            if feature.objectType == adsk.fusion.BaseFeature.classType():
-                baseFeature = feature
-                break        
-
+        baseFeature: adsk.fusion.BaseFeature = list(filter(lambda x: x.objectType == adsk.fusion.BaseFeature.classType(), customFeature.features))[0]
+ 
         # Update the body in the base feature.
         baseFeature.startEdit()
         body: adsk.fusion.BRepBody = baseFeature.bodies.item(0)
         baseFeature.updateBody(body, covebody)
         baseFeature.finishEdit()
+
         return True
     except:
         logger.exception('Exception')
-        showMessage('UpdateFillet: {}\n'.format(traceback.format_exc()))
+        showMessage(f'UpdateFillet: {traceback.format_exc()}\n')
         return False
 
 
@@ -566,9 +700,9 @@ def UpdateCove(customFeature: adsk.fusion.CustomFeature) -> bool:
 # None is returned. The case is when the point is very near the edge of
 # the face so it is ambiguous which face the point is on.
 def GetFaceUnderPoint(point: adsk.core.Point3D) -> adsk.fusion.BRepFace:
-    global root
-    des: adsk.fusion.Design = _app.activeProduct
-    root = des.rootComponent
+    global _des, _root
+    des: adsk.fusion.Design = _des
+    root: adsk.fusion.Component = _root
 
     foundFaces: adsk.core.ObjectCollection = root.findBRepUsingPoint(point, adsk.fusion.BRepEntityTypes.BRepFaceEntityType, 0.01, True)
     if foundFaces.count == 0:

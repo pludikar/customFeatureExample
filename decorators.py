@@ -1,4 +1,5 @@
 import logging
+import re
 import adsk.core, adsk.fusion
 from typing import ClassVar
 from dataclasses import dataclass
@@ -7,8 +8,10 @@ from functools import wraps
 
 pp = pprint.PrettyPrinter()
 
-logger = logging.getLogger('CustomPocket.decorators')
-logger.setLevel(logging.NOTSET)
+logger = logging.getLogger('customCove.decorators')
+logger.setLevel(logging.DEBUG)
+_app = adsk.core.Application.get()
+des: adsk.fusion.Design = _app.activeProduct
 
 @dataclass
 class HandlerContext():
@@ -75,8 +78,8 @@ def eventHandler(handler_cls=adsk.core.Base):
                         super().__init__()
 
                     def disableOnce(self):
-                        logger.debug(f'{notify_method.__name__} handler disabled set to True')
                         self._disabledOnce = True
+                        logger.debug(f'{notify_method.__name__} handler disabledOnce set to {self._disabledOnce}')
 
                     def enable(self):
                         self._disabled = False
@@ -87,10 +90,10 @@ def eventHandler(handler_cls=adsk.core.Base):
                     def notify( self, eventArgs):
                         try:
                             logger.debug(f'{notify_method.__name__} handler notified: {eventArgs.firingEvent.name}')
-                            logger.debug(f'self._disabled = {self._disabled} ')
+                            logger.debug(f'{notify_method.__name__} Once is {"Disabled".upper() if not self._disabledOnce else "Enabled".upper()} ')
                             if self._disabledOnce or self._disabled:
-                                logger.debug(f'{notify_method.__name__} handler disabled activated')
                                 self._disabledOnce = False
+                                logger.debug(f'{notify_method.__name__} handler disabledOnce {self._disabledOnce}')
                                 return
                             notify_method(*handler_args, eventArgs)  #notify_method_self and eventArgs come from the parent scope
                         except Exception as e:
@@ -109,3 +112,29 @@ def eventHandler(handler_cls=adsk.core.Base):
             return h
         return handlerWrapper
     return decoratorWrapper
+
+
+def timelineMarkers(func):
+    ''' logs timeline marker before and after eventHandler call'''
+    # func = decoratorArgs[0]
+    @wraps(func)
+    def inner(*args, **kwargs):
+        global _app
+        des: adsk.fusion.Design = _app.activeProduct
+
+        logger.debug(f'Start - {func.__name__} = {des.timeline.markerPosition}')
+        r = func(*args, **kwargs)
+        logger.debug(f'End - {func.__name__} = {des.timeline.markerPosition}')
+
+        return r
+    return inner
+
+# def disable_compute_event(func, event_handler):
+#     @wraps(func)
+#     def inner(*args, **kwargs):
+#         global _compute_handler
+#         event_handler.disable()
+#         result = func()
+#         event_handler.enable()
+#         return result
+#     return inner
